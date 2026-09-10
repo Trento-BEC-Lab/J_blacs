@@ -151,6 +151,16 @@ cython_debug/
 # Editors
 .vscode/
 
+# Shared launcher/environment tasks and dependency snapshots
+!/.vscode/
+/.vscode/*
+!/.vscode/tasks.json
+!/env/
+/env/*
+!/env/README.md
+!/env/conda-linux-64.lock
+!/env/pip-requirements.txt
+
 # conda build results
 conda_build/
 conda_packages/
