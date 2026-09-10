@@ -57,6 +57,19 @@
                 "cwd": "${workspaceFolder}"
             },
             "problemMatcher": []
+        },
+        {
+            "label": "Env: Copy local snapshot to shared",
+            "type": "process",
+            "command": "/usr/bin/python3",
+            "args": [
+                "${workspaceFolder}/scripts/environment.py",
+                "local-to-shared"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
         }
     ]
 }

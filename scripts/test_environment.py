@@ -17,6 +17,11 @@ def package(version='1', editable=False, pip=True):
 
 
 class EnvironmentTests(unittest.TestCase):
+    def setUp(self):
+        guard = patch.object(env, "ensure_shared")
+        guard.start()
+        self.addCleanup(guard.stop)
+
     def test_successful_sync_with_metadata_issues_exits_zero(self):
         with tempfile.TemporaryDirectory() as directory:
             lock = Path(directory) / 'lock'
@@ -71,6 +76,52 @@ class EnvironmentTests(unittest.TestCase):
                 args = run.call_args.args[0]
                 self.assertIn('--download-only', args)
                 self.assertNotEqual(args[args.index('-p') + 1], env.PREFIX)
+
+
+class SharedSnapshotTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.parent = Path(temporary.name)
+        self.root = self.parent / 'J_blacs'
+        self.shared = self.parent / 'env'
+        for name in ['ROOT', 'SHARED', 'LOCK', 'PIP']:
+            value = {'ROOT': self.root, 'SHARED': self.shared,
+                     'LOCK': self.shared / 'conda-linux-64.lock',
+                     'PIP': self.shared / 'pip-requirements.txt'}[name]
+            guard = patch.object(env, name, value)
+            guard.start()
+            self.addCleanup(guard.stop)
+        env.write_snapshot(self.root / 'env', '@EXPLICIT\nhttps://example.org/pkg.conda\n', 'zerorpc==0.6.3\n')
+
+    def test_bootstrap_and_copy_only_present_repositories(self):
+        (self.parent / 'J_runviewer').mkdir()
+        (self.root / 'env/README.md').write_text('Keep this documentation')
+        env.ensure_shared()
+        self.assertEqual(env.LOCK.read_bytes(), (self.root / 'env' / env.LOCK.name).read_bytes())
+        self.assertEqual(env.PIP.read_bytes(), (self.parent / 'J_runviewer/env' / env.PIP.name).read_bytes())
+        self.assertFalse((self.parent / 'J_runmanager').exists())
+        self.assertEqual((self.root / 'env/README.md').read_text(), 'Keep this documentation')
+
+    def test_existing_shared_wins_and_explicit_promotion_overwrites(self):
+        env.write_snapshot(self.shared, '@EXPLICIT\nhttps://example.org/shared.conda\n', 'zerorpc==0.6.2\n')
+        env.ensure_shared()
+        self.assertEqual(env.requirements(), {'zerorpc': '0.6.2'})
+        env.local_to_shared()
+        self.assertEqual(env.requirements(), {'zerorpc': '0.6.3'})
+
+    def test_incomplete_shared_is_not_silently_overwritten(self):
+        self.shared.mkdir()
+        env.LOCK.write_text('@EXPLICIT\n')
+        with self.assertRaises(ValueError):
+            env.ensure_shared()
+
+    def test_real_copy_error_is_not_hidden(self):
+        env.local_to_shared()
+        (self.parent / 'J_runviewer').mkdir()
+        (self.parent / 'J_runviewer/env').write_text('not a directory')
+        with self.assertRaises(OSError):
+            env.distribute()
 
 
 if __name__ == '__main__':

@@ -1,42 +1,54 @@
-# Development environment
+# Shared development environment
 
-Run the VS Code tasks through **Terminal → Run Task**:
+All six repositories use `~/.local/share/mamba/envs/labscript_test_v1` and the
+same authoritative snapshot in `../env/` (relative to each repository).
+Each repository's own `env/` contains Git-tracked copies of the two dependency
+files, not an independent environment definition.
 
-- **Env: Snapshot** records exact Linux conda package URLs/builds in
-  `conda-linux-64.lock` and ordinary pip packages in `pip-requirements.txt`.
-  It excludes editable projects. Direct-URL/local non-editable pip installs are
-  rejected rather than silently converted into inaccurate version pins.
-- **Env: Sync from lock** checks the conda inventory first. If it differs,
-  sync stops without changes and asks you to rebuild. Otherwise, it installs
-  missing/different pinned pip packages and removes extra non-editable pip
-  packages. Existing editable registrations are preserved. Pip requirements
-  cannot replace an editable or conda-owned package.
-- **Env: Rebuild from lock** requires typing `rebuild`. It downloads the conda
-  packages before removing and recreating `labscript_test_v1`, then installs
-  the pip requirements. Close applications using this environment first.
-  Editable registrations are removed, but source checkouts remain intact.
+Run through **Terminal → Run Task**:
+
+- **Env: Snapshot** exports the current conda package URLs/builds and ordinary
+  pip requirements to the shared folder, then copies both files to every existing
+  participating repository. Editable installs are excluded.
+- **Env: Sync from lock** reads the shared snapshot. If conda differs it stops
+  without package changes and asks for a rebuild. Otherwise it synchronizes
+  ordinary pip packages, removing extras, while preserving editable registrations.
+- **Env: Rebuild from lock** reads the shared snapshot and requires typing
+  `rebuild`. Close applications using the environment first. It prefetches conda
+  packages, removes and recreates the environment, then installs pip dependencies.
+  All editable registrations are removed, but source checkouts remain intact.
   Reinstall your chosen editable projects manually afterward.
+- **Env: Copy local snapshot to shared** replaces the shared snapshot with the
+  current repository's saved copy and distributes it to all participating folders.
+  This does not export or modify the installed environment. Use it to promote a
+  committed snapshot after a Git checkout/pull, then run Sync or Rebuild as needed.
 
-The target is `~/.local/share/mamba/envs/labscript_test_v1`. Tasks use system
-Python to orchestrate micromamba, so rebuilding does not delete the interpreter
-running the task. Network access is needed for uncached packages. A rebuild
-is not transactional: failure after removal can leave an incomplete environment;
-rerun the rebuild to recover.
+Participants: `J_labscript`, `J_labscript-devices`, `J_labscript-utils`, `J_blacs`,
+`J_runmanager`, and `J_runviewer`, located beside one another. Missing repositories
+are silently skipped. Distribution reports each repository copied; real write
+errors fail the task. Only `conda-linux-64.lock` and `pip-requirements.txt` are
+copied, preserving READMEs and other files. Commits remain manual.
 
-Pip installation uses `--no-deps`: dependencies must be captured separately in
-the conda lock or pip requirements. Pip versions are pinned, but package artifacts
-are not hash-locked. These files describe dependencies, not Git source revisions.
-Pulling ordinary Python source changes does not require reinstalling editable
-projects; metadata/entry-point changes or compiled extensions can require it.
+On first Sync/Rebuild, if both shared snapshot files are absent, they are
+initialized from the current repository and distributed. An incomplete shared
+snapshot is an error; use Copy local snapshot to shared to restore it. Existing
+shared files always take precedence over local copies. A Snapshot or copy task
+can therefore modify tracked files in every participating repository. Run these
+shared-environment tasks one at a time.
 
-Sync/rebuild verify both dependency inventories and then run `pip check`.
-Metadata issues are advisory and do not fail a successful sync/rebuild. Actual
-installation errors or inventory mismatches still produce a nonzero exit. The initial
-snapshot has existing missing requirements reported for `labscript-devices`
-(`pydaqmx`, `pynivision`, `pyserial`, `pyvisa`, `spinapi`) and `setuptools-conda`
-(`ripgrep`, although the conda executable package is installed).
+The tasks use system Python to orchestrate micromamba. Network access is needed
+for uncached dependencies. Rebuild is not transactional: failure after removal
+can leave an incomplete environment; rerun Rebuild to recover.
 
-For a manual editable install after restoring dependencies:
+Pip uses `--no-deps`; dependencies must be captured separately. Pip versions are
+pinned but artifacts are not hash-locked. Direct-URL/local non-editable pip
+installs are rejected by Snapshot rather than converted to inaccurate pins.
+Sync/Rebuild verify both inventories; `pip check` issues are advisory. Actual
+installation errors or inventory mismatches still fail the task.
+
+Editable projects and their Git revisions remain under your control. Ordinary
+Python source changes take effect after restart; metadata/entry-point changes
+or compiled extensions can require reinstalling. For a manual editable install:
 
 ```bash
 ~/.local/share/mamba/envs/labscript_test_v1/bin/python -m pip install --no-deps -e .

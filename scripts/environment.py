@@ -11,8 +11,11 @@ import tempfile
 ROOT = Path(__file__).resolve().parent.parent
 PREFIX = Path.home() / '.local/share/mamba/envs/labscript_test_v1'
 MAMBA = '/usr/local/bin/micromamba'
-LOCK = ROOT / 'env/conda-linux-64.lock'
-PIP = ROOT / 'env/pip-requirements.txt'
+PARTICIPANTS = ('J_labscript', 'J_labscript-devices', 'J_labscript-utils',
+                'J_blacs', 'J_runmanager', 'J_runviewer')
+SHARED = ROOT.parent / 'env'
+LOCK = SHARED / 'conda-linux-64.lock'
+PIP = SHARED / 'pip-requirements.txt'
 
 
 def run(args, capture=False):
@@ -46,9 +49,9 @@ def normal(name):
     return re.sub(r'[-_.]+', '-', name).lower()
 
 
-def requirements():
+def requirements(path=None):
     result = {}
-    for line in PIP.read_text().splitlines():
+    for line in (path or PIP).read_text().splitlines():
         line = line.strip()
         if not line or line.startswith('#'):
             continue
@@ -58,6 +61,46 @@ def requirements():
         name, version = match.groups()
         result[normal(name)] = version
     return result
+
+
+def write_snapshot(directory, conda, pip):
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, contents in [('conda-linux-64.lock', conda), ('pip-requirements.txt', pip)]:
+        with tempfile.NamedTemporaryFile(mode='w', dir=directory, delete=False) as f:
+            temporary = Path(f.name)
+            f.write(contents)
+        try:
+            temporary.replace(directory / name)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def distribute():
+    conda, pip = LOCK.read_text(), PIP.read_text()
+    for name in PARTICIPANTS:
+        repository = ROOT.parent / name
+        if repository.is_dir():
+            write_snapshot(repository / 'env', conda, pip)
+            print(f'Copied snapshot to {name}/env/', flush=True)
+
+
+def local_to_shared():
+    local = ROOT / 'env'
+    conda = (local / LOCK.name).read_text()
+    urls(conda)
+    requirements(local / PIP.name)
+    pip = (local / PIP.name).read_text()
+    write_snapshot(SHARED, conda, pip)
+    print(f'Updated shared snapshot from {ROOT.name}: {SHARED}', flush=True)
+    distribute()
+
+
+def ensure_shared():
+    if not LOCK.exists() and not PIP.exists():
+        print('Shared snapshot missing; initializing from this repository.', flush=True)
+        local_to_shared()
+    elif not LOCK.is_file() or not PIP.is_file():
+        raise ValueError('Shared snapshot is incomplete. Run Env: Copy local snapshot to shared to restore it.')
 
 
 def pip_packages(items):
@@ -91,8 +134,11 @@ def health():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['snapshot', 'sync', 'rebuild'])
+    parser.add_argument('action', choices=['snapshot', 'sync', 'rebuild', 'local-to-shared'])
     args = parser.parse_args()
+    if args.action == 'local-to-shared':
+        local_to_shared()
+        return 0
     if args.action == 'snapshot':
         items = inventory()
         direct = [n for n, d in items.items() if d['pip'] and not d['editable'] and d['direct']]
@@ -100,14 +146,16 @@ def main():
             raise ValueError('Cannot represent direct-URL/local non-editable packages as version pins: ' + ', '.join(direct))
         conda = export()
         urls(conda)
-        LOCK.parent.mkdir(exist_ok=True)
-        LOCK.write_text(conda)
-        PIP.write_text('# Pip dependencies only; editable projects are excluded.\n' +
-                       ''.join(f'{n}=={v}\n' for n, v in sorted(pip_packages(items).items())))
+        pip = '# Pip dependencies only; editable projects are excluded.\n' + ''.join(
+            f'{n}=={v}\n' for n, v in sorted(pip_packages(items).items()))
+        write_snapshot(SHARED, conda, pip)
+        distribute()
         print('Saved conda lock and pip requirements. Excluded editable projects:',
               ', '.join(n for n, d in items.items() if d['editable']))
         return 0
 
+    ensure_shared()
+    print(f'Using shared snapshot: {SHARED}', flush=True)
     desired_conda = urls(LOCK.read_text())
     wanted = requirements()
     if args.action == 'sync':
